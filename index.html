@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Balanceo de Cargas WO</title>
+  <link rel="stylesheet" href="style.css">
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+</head>
+<body>
+<div id="app">
+
+  <header class="header">
+    <div class="header-left">
+      <h1>Balanceo de Cargas WO</h1>
+      <span class="subtitle">Plan semanal &middot; N &rarr; N+3</span>
+    </div>
+    <div class="header-right">
+      <button class="btn-demo"    onclick="cargarDemoData()">Ejemplo</button>
+      <label  class="btn-import btn-plan"    for="filePlan">&#128203; Plan</label>
+      <input type="file" id="filePlan"    accept=".xlsx,.xls" hidden>
+      <label  class="btn-import btn-entrega" for="fileEntrega">&#128230; Entregas</label>
+      <input type="file" id="fileEntrega" accept=".xlsx,.xls" hidden>
+      <label  class="btn-import btn-insumo"  for="fileInsumo">&#128994; Insumos</label>
+      <input type="file" id="fileInsumo"  accept=".xlsx,.xls" hidden>
+      <button class="btn-export"  onclick="showExportModal()">&#11014; Exportar</button>
+      <button class="btn-save"    id="btn-save" onclick="manualSave()">&#128190; Guardar</button>
+    </div>
+  </header>
+
+  <div class="status-bar">
+    <div class="status-item" id="status-plan">
+      <span class="status-dot dot-off"></span><span>Plan: sin cargar</span>
+    </div>
+    <div class="status-item" id="status-entrega">
+      <span class="status-dot dot-off"></span><span>Entregas: sin cargar</span>
+    </div>
+    <div class="status-item" id="status-insumo">
+      <span class="status-dot dot-off"></span><span>Insumos: sin cargar</span>
+    </div>
+    <div style="margin-left:auto;display:flex;gap:16px;align-items:center">
+      <span id="save-indicator" style="font-size:11px;color:#aaa"></span>
+      <span id="status-semanas" style="font-size:11px;color:#aaa"></span>
+    </div>
+  </div>
+
+  <div class="metrics">
+    <div class="metric-card"><div class="metric-label">Utilizacion total</div><div class="metric-value" id="m-util">—</div></div>
+    <div class="metric-card"><div class="metric-label">Lts planificados</div><div class="metric-value" id="m-lts">—</div></div>
+    <div class="metric-card"><div class="metric-label">Alertas</div><div class="metric-value" id="m-alerts">—</div></div>
+    <div class="metric-card"><div class="metric-label">Insumos con problema</div><div class="metric-value" id="m-insumo">—</div></div>
+  </div>
+
+  <div class="tabs">
+    <button class="tab on"  data-tab="plan">Vista resumen</button>
+    <button class="tab"     data-tab="historial">Historial <span id="hist-badge" class="badge-count">0</span></button>
+    <button class="tab"     data-tab="alertas">Alertas <span id="alert-badge" class="badge-count">0</span></button>
+    <button class="tab"     data-tab="config">Configuracion</button>
+  </div>
+
+  <div id="panel-plan" class="panel on">
+    <div class="plan-toolbar">
+      <button class="tool-btn" id="btn-chart"   onclick="toggleChart()">&#128202; Grafico</button>
+      <button class="tool-btn" id="btn-compare" onclick="toggleCompare()">&#8644; Comparacion</button>
+    </div>
+    <div id="chart-section"></div>
+    <div id="compare-section"></div>
+    <div class="filter-bar">
+      <span class="filter-label">Agrupar por semana:</span>
+      <div id="semana-filter"></div>
+    </div>
+    <div id="pivot-container">
+      <div class="empty-state">
+        <div class="empty-icon">&#128202;</div>
+        <div class="empty-title">Sin datos</div>
+        <div class="empty-sub">Importa el Plan y las Entregas, o usa "Ejemplo".</div>
+      </div>
+    </div>
+  </div>
+
+  <div id="panel-historial" class="panel"><div id="historial-container">
+    <div class="empty-state"><div class="empty-icon">&#128203;</div>
+    <div class="empty-title">Sin movimientos</div>
+    <div class="empty-sub">Los movimientos se registran aqui automaticamente.</div></div>
+  </div></div>
+  <div id="panel-alertas"  class="panel"><div id="alertas-container"></div></div>
+  <div id="panel-config"   class="panel"><div id="config-container"></div></div>
+
+</div>
+
+<div id="modal-overlay" class="modal-overlay hidden">
+  <div class="modal">
+    <h2 id="modal-title">Mapear columnas</h2>
+    <p  id="modal-desc">Selecciona que columna corresponde a cada campo:</p>
+    <div id="col-map-fields"></div>
+    <div class="modal-actions">
+      <button class="btn-primary" id="modal-confirm-btn" onclick="confirmImport()">Confirmar e importar</button>
+      <button class="btn-secondary" onclick="cerrarModal()">Cancelar</button>
+    </div>
+  </div>
+</div>
+
+<script src="app.js"></script>
+</body>
+</html>
