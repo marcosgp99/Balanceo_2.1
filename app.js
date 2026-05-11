@@ -1,5 +1,5 @@
 // ============================================================
-// BALANCEO DE CARGAS WO v6
+// BALANCEO DE CARGAS WO v6 — Programacion CQ, Grupo Peñaflor
 // ============================================================
 
 const state = {
@@ -101,6 +101,13 @@ document.addEventListener('DOMContentLoaded', () => {
       if (tab.dataset.tab === 'historial') renderHistorial();
     });
   });
+
+  // Sincronizacion en tiempo real con bodegas.html
+  window.addEventListener('storage', e => {
+    if (e.key === 'bwo-shared-entregas' && (state.planLoaded || state.entregaLoaded)) {
+      render();
+    }
+  });
 });
 
 // ── FILE IMPORT ───────────────────────────────────────────
@@ -125,7 +132,7 @@ function handleFileUpload(e, mode) {
 function autoDetect(headers, mode) {
   const m = { codEq:'', semana:'', lts:'', wo:'', estado:'', fecha:'', etiqueta:'', caja:'' };
   headers.forEach(h => {
-    const hl = h.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'');
+    const hl = h.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
     if (!m.codEq    && /codeq|equivalente/.test(hl))      m.codEq    = h;
     if (!m.semana   && /\bsemana\b/.test(hl))              m.semana   = h;
     if (!m.lts      && /^lts$/.test(hl))                   m.lts      = h;
@@ -146,7 +153,7 @@ function autoDetect(headers, mode) {
 
 function showColumnMapper(headers, detected, mode) {
   const byMode = {
-    plan:     [
+    plan: [
       { key:'codEq',  label:'CodEq',             req:true  },
       { key:'semana', label:'Semana',             req:true  },
       { key:'lts',    label:'Volumen (Lts)',       req:true  },
@@ -176,7 +183,7 @@ function showColumnMapper(headers, detected, mode) {
         <label>${f.label}${f.req ? '' : ' <span style="color:#bbb;font-size:11px">(opc.)</span>'}</label>
         <select id="map-${f.key}">
           ${!f.req ? '<option value="">— no usar —</option>' : '<option value="">— seleccionar —</option>'}
-          ${headers.map(h => `<option value="${h}"${h===detected[f.key]?' selected':''}>${h}</option>`).join('')}
+          ${headers.map(h => `<option value="${h}"${h === detected[f.key] ? ' selected' : ''}>${h}</option>`).join('')}
         </select>
       </div>`).join('');
   document.getElementById('modal-overlay').classList.remove('hidden');
@@ -215,6 +222,7 @@ function cerrarModal() {
   document.getElementById('modal-overlay').classList.add('hidden');
 }
 
+// ── PROCESS DATA ──────────────────────────────────────────
 function processData(rows, m) {
   const H  = state.rawHeaders;
   const ix = k => (m[k] ? H.indexOf(m[k]) : -1);
@@ -432,7 +440,7 @@ function showExportModal() {
   if (!state.planHeaders.length) { alert('Primero importá el Plan.'); return; }
   const autoC = state.planHeaders.find(h => /cantordenada/i.test(h)) || '';
   openModal('Exportar WOs balanceadas',
-    movedIds.length + ' WOs movidas se van a exportar. ¿Cuál columna es CantOrdenadaPT?',
+    movedIds.length + ' WOs movidas. ¿Cuál columna es CantOrdenadaPT?',
     `<div class="col-map-row"><label>CantOrdenadaPT</label>
      <select id="map-export-cant">
        <option value="">— seleccionar —</option>
@@ -527,19 +535,40 @@ function buildPivot() {
     pivot[cod][sem].planVol += r.lts;
     pivot[cod][sem].wos.push({ ...r, semLabel:sem, codEqEff:cod });
   });
+  // Merma por CodEq por semana
   Object.keys(pivot).forEach(cod =>
     Object.keys(pivot[cod]).forEach(sem => { pivot[cod][sem].planVol += state.config.merma; })
   );
+  // Entregas desde Excel
   state.entregaData.forEach(r => {
     const sem = state.semanaMap[r.semanaRaw];
     if (!sem || !pivot[r.codEq]) return;
     if (!pivot[r.codEq][sem]) pivot[r.codEq][sem] = { planVol:0, entregaVol:0, wos:[] };
     pivot[r.codEq][sem].entregaVol += r.lts;
   });
+  // Volúmenes ingresados desde bodegas.html (sincronizacion en tiempo real)
+  try {
+    const sharedRaw = localStorage.getItem('bwo-shared-entregas');
+    if (sharedRaw) {
+      const shared = JSON.parse(sharedRaw);
+      Object.entries(shared).forEach(([key, vol]) => {
+        const [cod, sem] = key.split('|||');
+        if (pivot[cod]?.[sem] && parseFloat(vol) > 0) {
+          pivot[cod][sem].entregaVol = parseFloat(vol);
+          pivot[cod][sem].fromBodega = true;
+        }
+      });
+    }
+  } catch(e) {}
+  // Ediciones manuales del mismo Balanceo
   Object.entries(state.editedEntregas).forEach(([key, val]) => {
     const [cod, sem] = key.split('__');
-    if (pivot[cod]?.[sem]) pivot[cod][sem].entregaVol = val;
+    if (pivot[cod]?.[sem]) {
+      pivot[cod][sem].entregaVol = val;
+      pivot[cod][sem].fromBodega = false;
+    }
   });
+  // Calcular %
   Object.values(pivot).forEach(cd =>
     Object.values(cd).forEach(cell => {
       cell.pct = cell.entregaVol > 0 ? Math.round(cell.planVol / cell.entregaVol * 100) : null;
@@ -575,13 +604,13 @@ function renderMetrics(pivot) {
       if (sem) { const c = getSemaforoColor(r.wo, sem); if (c==='red'||c==='yellow') ipCnt++; }
     });
   }
-  document.getElementById('m-util').textContent    = state.planLoaded ? utilPct+'%' : '—';
-  document.getElementById('m-util').className      = 'metric-value ' + (state.planLoaded ? utilCls : '');
-  document.getElementById('m-lts').textContent     = state.planLoaded ? fmtLts(totalPlanV) : '—';
-  document.getElementById('m-alerts').textContent  = (state.planLoaded||state.entregaLoaded) ? na : '—';
-  document.getElementById('m-alerts').className    = 'metric-value ' + (na>0?'warn':'ok');
-  document.getElementById('m-insumo').textContent  = state.insumoLoaded ? ipCnt : '—';
-  document.getElementById('m-insumo').className    = 'metric-value ' + (ipCnt>0?'danger':'ok');
+  document.getElementById('m-util').textContent   = state.planLoaded ? utilPct+'%' : '—';
+  document.getElementById('m-util').className     = 'metric-value ' + (state.planLoaded ? utilCls : '');
+  document.getElementById('m-lts').textContent    = state.planLoaded ? fmtLts(totalPlanV) : '—';
+  document.getElementById('m-alerts').textContent = (state.planLoaded||state.entregaLoaded) ? na : '—';
+  document.getElementById('m-alerts').className   = 'metric-value ' + (na>0?'warn':'ok');
+  document.getElementById('m-insumo').textContent = state.insumoLoaded ? ipCnt : '—';
+  document.getElementById('m-insumo').className   = 'metric-value ' + (ipCnt>0?'danger':'ok');
   document.getElementById('alert-badge').textContent = na;
 }
 
@@ -599,17 +628,15 @@ function setFiltro(val) {
   renderPivotTable(buildPivot());
 }
 
-// ── CHART & COMPARE TOGGLE ────────────────────────────────
+// ── CHART & COMPARE ───────────────────────────────────────
 function toggleChart() {
   state.showChart = !state.showChart;
-  const btn = document.getElementById('btn-chart');
-  if (btn) btn.classList.toggle('active', state.showChart);
+  document.getElementById('btn-chart')?.classList.toggle('active', state.showChart);
   renderPivotTable(buildPivot());
 }
 function toggleCompare() {
   state.showCompare = !state.showCompare;
-  const btn = document.getElementById('btn-compare');
-  if (btn) btn.classList.toggle('active', state.showCompare);
+  document.getElementById('btn-compare')?.classList.toggle('active', state.showCompare);
   renderPivotTable(buildPivot());
 }
 
@@ -618,7 +645,6 @@ function renderChartHTML(pivot) {
   const caps    = state.config.capacidades;
   const totalCap = semanas.reduce((a,s) => a+(+caps[s]||0), 0);
   if (!totalCap) return '<div style="font-size:12px;color:#aaa;padding:8px">Configura las capacidades para ver el gráfico.</div>';
-
   const bars = semanas.map(s => {
     const cap   = +caps[s]||0;
     const planV = Object.values(pivot).reduce((a,cd) => a+(cd[s]?cd[s].planVol:0), 0);
@@ -632,18 +658,15 @@ function renderChartHTML(pivot) {
       <div class="chart-nums">${fmtLts(planV)}${cajas}</div>
     </div>`;
   }).join('');
-
   const totalPlanV = semanas.reduce((a,s) =>
     a+Object.values(pivot).reduce((b,cd) => b+(cd[s]?cd[s].planVol:0), 0), 0);
   const tPct = totalCap>0 ? Math.round(totalPlanV/totalCap*100) : 0;
   const tCol = tPct>=95?'#E24B4A':tPct>=75?'#EF9F27':'#1D9E75';
-
   return `<div class="chart-wrap">
     <div class="chart-hdr">
       <span class="chart-ttl">Utilizacion de fraccionamiento</span>
       <span class="chart-total-val" style="color:${tCol}">${tPct}% total &nbsp;|&nbsp; ${fmtLts(totalPlanV)} Lts</span>
-    </div>
-    ${bars}
+    </div>${bars}
   </div>`;
 }
 
@@ -671,14 +694,14 @@ function renderPivotTable(pivot) {
   const semanas = ['N','N+1','N+2','N+3'];
   let codigos   = Object.keys(pivot);
 
-  // Chart / compare sections
   document.getElementById('chart-section').innerHTML   = state.showChart   ? renderChartHTML(pivot)  : '';
   document.getElementById('compare-section').innerHTML = state.showCompare ? renderCompareHTML()      : '';
 
   if (!codigos.length) {
     document.getElementById('pivot-container').innerHTML =
       `<div class="empty-state"><div class="empty-icon">&#128202;</div>
-       <div class="empty-title">Sin datos</div><div class="empty-sub">${state.planLoaded?'No hay WOs.':'Importá el Plan.'}</div></div>`;
+       <div class="empty-title">Sin datos</div>
+       <div class="empty-sub">${state.planLoaded?'No hay WOs.':'Importá el Plan.'}</div></div>`;
     return;
   }
 
@@ -708,13 +731,18 @@ function renderPivotTable(pivot) {
       const p = cell.pct;
       let cls = 'pcell'+(s==='N+3'?' pcell-n3':'');
       let pTxt = '—';
-      if (p!==null && state.entregaLoaded) {
+      if (p!==null && (state.entregaLoaded||cell.fromBodega)) {
         pTxt = p+'%';
         cls += p>state.config.maxPct?' cell-warn':p<state.config.minPct?' cell-surplus':' cell-ok';
-      } else cls += ' cell-nodata';
+      } else {
+        cls += ' cell-nodata';
+      }
       const cajas = state.config.factorCajas>0 ? Math.round(cell.planVol/state.config.factorCajas) : 0;
       const cajasStr = cajas>0 ? ` / ${fmtNum(cajas)}cj` : '';
       const isEdited = state.editedEntregas[cod+'__'+s] !== undefined;
+      const bodBadge = cell.fromBodega
+        ? ' <span style="font-size:9px;background:#E6F1FB;color:#185FA5;padding:1px 4px;border-radius:3px;font-weight:600">BOD</span>'
+        : '';
       let semaHtml = '';
       if (state.insumoLoaded) {
         const cs = cell.wos.map(w=>getSemaforoColor(w.wo,s));
@@ -724,7 +752,7 @@ function renderPivotTable(pivot) {
       }
       return `<td class="${cls}" ondblclick="editEntrega('${cod}','${s}',${cell.entregaVol},event)">
         <div class="cell-pct">${pTxt}</div>
-        <div class="cell-vols">WO:${fmtLts(cell.planVol)}${cajasStr}${state.entregaLoaded?' / E:'+fmtLts(cell.entregaVol)+(isEdited?' ✏':''):''}</div>
+        <div class="cell-vols">WO:${fmtLts(cell.planVol)}${cajasStr}${(state.entregaLoaded||cell.fromBodega)?' / E:'+fmtLts(cell.entregaVol)+(bodBadge||(isEdited?' ✏':'')):''}</div>
         ${semaHtml}
       </td>`;
     }).join('');
@@ -739,18 +767,15 @@ function renderPivotTable(pivot) {
       const isN3      = effSem==='N+3';
       const note      = state.notes[w.id];
       const hasCodEdit = state.editedCodEq[w.id];
-
       let trCls = '';
       let arrivalHtml = '';
       if (isN3 && state.insumoLoaded) {
-        const sColor = getSemaforoColor(w.wo, 'N+3');
-        trCls = sColor==='green' ? 'sub-ok' : (sColor==='red'||sColor==='yellow') ? 'sub-nok' : '';
+        const sColor = getSemaforoColor(w.wo,'N+3');
+        trCls = sColor==='green'?'sub-ok':(sColor==='red'||sColor==='yellow')?'sub-nok':'';
         const info = getArrivalInfo(w.wo,'N+3');
         if (info) arrivalHtml = `<span class="arrival-date${info.ok?'':' nok'}">${info.text}</span>`;
       }
-
       const cajas = state.config.factorCajas>0 ? ` / ${Math.round(w.lts/state.config.factorCajas)} cj` : '';
-
       return `<tr class="${trCls}" onclick="event.stopPropagation()">
         <td style="padding-left:44px">
           ${isN3&&state.insumoLoaded?`<span class="sema-dot sema-${getSemaforoColor(w.wo,'N+3')}" title="${getSemaforoText(w.wo,'N+3')}"></span> `:''}
@@ -758,17 +783,17 @@ function renderPivotTable(pivot) {
           ${hasCodEdit?`<span style="font-size:10px;color:#185FA5;margin-left:5px">✏ ${getCodEq(w)}</span>`:''}
           ${arrivalHtml}
         </td>
-        <td><span class="sem-badge${isN3?' sem-n3':effSem==='N+1'?'':''}">${effSem}</span>
+        <td><span class="sem-badge${isN3?' sem-n3':''}">${effSem}</span>
           ${isMoved?`<span style="font-size:9px;color:#aaa"> (orig. ${getOrigSemana(w)||'?'})</span>`:''}
         </td>
         <td>${fmtLts(w.lts)} Lts${cajas}</td>
         <td>${w.estado||'—'}</td>
         <td>${w.fecha||'—'}</td>
         <td style="white-space:nowrap">
-          ${canMoveN2 ?`<button class="btn-mover"    onclick="moveToN2(${w.id})">&#8593; N+2</button> `:''}
-          ${canMoveN1 ?`<button class="btn-mover-n1" onclick="moveToN1(${w.id})">&#8593; N+1</button> `:''}
-          ${isMoved   ?`<button class="btn-revert"   onclick="revertirA(${w.id})">&#8595; Revertir</button> `:''}
-          <button class="btn-note" onclick="editNote(${w.id},'${w.wo}',event)" title="Nota">&#128203;</button>
+          ${canMoveN2?`<button class="btn-mover"    onclick="moveToN2(${w.id})">&#8593; N+2</button> `:''}
+          ${canMoveN1?`<button class="btn-mover-n1" onclick="moveToN1(${w.id})">&#8593; N+1</button> `:''}
+          ${isMoved  ?`<button class="btn-revert"   onclick="revertirA(${w.id})">&#8595; Revertir</button> `:''}
+          <button class="btn-note"    onclick="editNote(${w.id},'${w.wo}',event)" title="Nota">&#128203;</button>
           <button class="btn-edit-sm" onclick="editCodEq(${w.id},'${w.wo}','${getCodEq(w)}',event)" title="Editar CodEq">&#9998;</button>
         </td>
       </tr>
@@ -789,10 +814,10 @@ function renderPivotTable(pivot) {
         <td><div class="cod-cell">
           <span class="expand-icon${isExp?' open':''}">&#9658;</span>
           <span class="cod-name">${cod}</span>
-          ${isDup ?'<span class="badge b-dup">3+ sem.</span>':''}
+          ${isDup ?'<span class="badge b-dup">3+ sem.</span>'    :''}
           ${hasN2S?'<span class="badge b-surplus">Sobrante N+2</span>':''}
           ${hasN1S?'<span class="badge b-surplus">Sobrante N+1</span>':''}
-          ${isTop ?'<span class="badge b-top">&#9650;</span>':''}
+          ${isTop ?'<span class="badge b-top">&#9650;</span>'    :''}
         </div></td>
         ${cells}
       </tr>${subSection}`;
@@ -819,7 +844,7 @@ function renderPivotTable(pivot) {
           <span class="leg-item"><span class="sema-dot sema-yellow"></span>Insumos parcial</span>
           <span class="leg-item"><span class="sema-dot sema-red"></span>Insumos falta</span>`:''}
         <span class="leg-item" style="color:#bbb;font-size:11px">
-          % = WO/Entrega &nbsp;·&nbsp; +${fmtLts(state.config.merma)} merma &nbsp;·&nbsp; Doble-clic celda E: para editar entrega
+          % = WO/Entrega &nbsp;·&nbsp; +${fmtLts(state.config.merma)} merma &nbsp;·&nbsp; BOD = desde Bodegas &nbsp;·&nbsp; Doble-clic E: editar entrega
         </span>
       </div>
     </div>`;
@@ -831,12 +856,12 @@ function renderCapSummary(pivot) {
   const totalCap = semanas.reduce((a,s)=>a+(+caps[s]||0),0);
   if (!totalCap) return '';
   const cards = semanas.map(s => {
-    const cap  = +caps[s]||0;
-    const planV= Object.values(pivot).reduce((a,cd)=>a+(cd[s]?cd[s].planVol:0),0);
-    const pct  = cap>0?Math.round(planV/cap*100):0;
-    const cls  = pct>=95?'danger':pct>=70?'ok':'warn';
-    const fCls = pct>=95?'fill-danger':pct>=70?'fill-ok':'fill-warn';
-    const cajas= state.config.factorCajas>0 ? `<div style="font-size:10px;color:#aaa">${fmtNum(Math.round(planV/state.config.factorCajas))} cj</div>` : '';
+    const cap   = +caps[s]||0;
+    const planV = Object.values(pivot).reduce((a,cd)=>a+(cd[s]?cd[s].planVol:0),0);
+    const pct   = cap>0?Math.round(planV/cap*100):0;
+    const cls   = pct>=95?'danger':pct>=70?'ok':'warn';
+    const fCls  = pct>=95?'fill-danger':pct>=70?'fill-ok':'fill-warn';
+    const cajas = state.config.factorCajas>0 ? `<div style="font-size:10px;color:#aaa">${fmtNum(Math.round(planV/state.config.factorCajas))} cj</div>` : '';
     return `<div class="cap-card">
       <div class="cap-sem">Sem. ${s}</div>
       <div class="cap-bar-wrap"><div class="cap-bar-fill ${fCls}" style="width:${Math.min(pct,100)}%"></div></div>
@@ -877,9 +902,9 @@ function renderHistorial() {
   }
   const rows = state.historial.map(h => {
     const d   = new Date(h.ts);
-    const ts  = d.toLocaleDateString('es-AR') + ' ' + d.toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit'});
-    const icon= h.accion==='revertir' ? '&#8617;' : '&#8593;';
-    const cls = h.accion==='revertir' ? 'hist-revert' : 'hist-move';
+    const ts  = d.toLocaleDateString('es-AR')+' '+d.toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit'});
+    const icon= h.accion==='revertir'?'&#8617;':'&#8593;';
+    const cls = h.accion==='revertir'?'hist-revert':'hist-move';
     return `<div class="hist-item ${cls}">
       <span class="hist-icon">${icon}</span>
       <div class="hist-content">
@@ -912,13 +937,11 @@ function computeAlerts(pivot) {
       const cell = pivot[cod][s];
       if (cell?.pct > state.config.maxPct) deficit.push({ cod, semana:s, pct:cell.pct });
     });
-    // N+2 surplus → N+3 WOs
     const n2 = pivot[cod]['N+2'];
     if (n2?.entregaVol>0 && n2.planVol<n2.entregaVol) {
       const wos = (pivot[cod]['N+3']||{wos:[]}).wos.filter(w=>!state.movedToN2[w.id]);
       if (wos.length) surplus.push({ cod, sobrante:n2.entregaVol-n2.planVol, wos, moveTo:'N+2', moveFn:'moveToN2' });
     }
-    // N+1 surplus → N+2 WOs
     const n1 = pivot[cod]['N+1'];
     if (n1?.entregaVol>0 && n1.planVol<n1.entregaVol) {
       const wos = (pivot[cod]['N+2']||{wos:[]}).wos.filter(w=>!state.movedToN1[w.id]);
@@ -972,12 +995,14 @@ function renderAlertas(pivot) {
       <div class="alert-section-title">&#128994; Semaforo insumos (${a.insumoProb.length} WOs)</div>
       ${rojos.length?`<div class="alert-card danger"><div class="alert-icon">&#128308;</div>
         <div><div class="alert-title">Sin insumos completos (${rojos.length})</div>
-        ${rojos.map(x=>`<div style="font-size:12px;margin-top:4px"><span class="sema-dot sema-red" style="display:inline-block;vertical-align:middle;margin-right:5px"></span>
+        ${rojos.map(x=>`<div style="font-size:12px;margin-top:4px">
+          <span class="sema-dot sema-red" style="display:inline-block;vertical-align:middle;margin-right:5px"></span>
           <strong>${x.wo}</strong> &middot; ${x.cod} &middot; Sem.${x.semana} &middot; <span style="color:#888">${x.text}</span>
         </div>`).join('')}</div></div>`:''}
       ${ams.length?`<div class="alert-card warn"><div class="alert-icon">&#128993;</div>
         <div><div class="alert-title">Insumos parciales (${ams.length})</div>
-        ${ams.map(x=>`<div style="font-size:12px;margin-top:4px"><span class="sema-dot sema-yellow" style="display:inline-block;vertical-align:middle;margin-right:5px"></span>
+        ${ams.map(x=>`<div style="font-size:12px;margin-top:4px">
+          <span class="sema-dot sema-yellow" style="display:inline-block;vertical-align:middle;margin-right:5px"></span>
           <strong>${x.wo}</strong> &middot; ${x.cod} &middot; Sem.${x.semana} &middot; <span style="color:#888">${x.text}</span>
         </div>`).join('')}</div></div>`:''}
     </div>`;
@@ -1086,7 +1111,7 @@ function updateCapTotal() {
   if (el) el.innerHTML = `<strong>${fmtLts(t)} Lts</strong>`;
 }
 function saveConfig() {
-  state.config.semanaInicio = document.getElementById('cfg-fecha')?.value  || state.config.semanaInicio;
+  state.config.semanaInicio = document.getElementById('cfg-fecha')?.value   || state.config.semanaInicio;
   state.config.merma        = parseFloat(document.getElementById('cfg-merma')?.value)  || 1000;
   state.config.factorCajas  = parseFloat(document.getElementById('cfg-cajas')?.value)  || 9;
   state.config.minPct       = parseFloat(document.getElementById('cfg-min')?.value)    || 80;
