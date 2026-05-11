@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Balanceo de Cargas WO</title>
+  <title>Programacion CQ — Grupo Peñaflor</title>
   <link rel="stylesheet" href="style.css">
   <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 </head>
@@ -12,10 +12,12 @@
 
   <header class="header">
     <div class="header-left">
-      <h1>Balanceo de Cargas WO</h1>
-      <span class="subtitle">Plan semanal &middot; N &rarr; N+3</span>
+     <h1>Programacion CQ &mdash; Grupo Pe&ntilde;aflor</h1>
+<span class="subtitle">Plan semanal &middot; N &rarr; N+3</span>
     </div>
     <div class="header-right">
+      <a href="bodegas.html" class="btn-bodegas">&#127863; Bodegas</a>
+<button class="btn-demo" onclick="cargarDemoData()">Ejemplo</button>
       <button class="btn-demo"    onclick="cargarDemoData()">Ejemplo</button>
       <label  class="btn-import btn-plan"    for="filePlan">&#128203; Plan</label>
       <input type="file" id="filePlan"    accept=".xlsx,.xls" hidden>
